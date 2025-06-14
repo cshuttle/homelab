@@ -1,17 +1,10 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: debug-hostpath
-  namespace: default
+  name: debug-pod
+  namespace: linkding
 spec:
   containers:
   - name: debug
-    image: busybox:1.36
+    image: alpine/curl:latest
     command: ["sleep", "3600"]
-    volumeMounts:
-    - name: var-dir
-      mountPath: /host/var
-  volumes:
-  - name: var-dir
-    hostPath:
-      path: /var
