@@ -6,7 +6,8 @@ kind: Namespace
 metadata:
   name: local-path-storage
   # THIS IS THE FIX:
-  # The PSS labels are correctly placed on the Namespace resource.
+  # The PSS labels are now correctly placed on the Namespace resource,
+  # which is where Kubernetes enforces Pod Security Standards.
   labels:
     pod-security.kubernetes.io/enforce: privileged
     pod-security.kubernetes.io/enforce-version: latest
