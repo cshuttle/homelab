@@ -1,0 +1,11 @@
+# FILE: apps/base/nfs-provisioner/storageclass.yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-client
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: k8s-sigs.io/nfs-subdir-external-provisioner
+parameters:
+  # When a PVC is deleted, the corresponding subdirectory will also be deleted.
+  archiveOnDelete: "false"

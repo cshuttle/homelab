@@ -4,4 +4,4 @@ kind: Kustomization
 resources:
   - ./flux-system/
   - ./apps.yaml
-  # - ./storage-provisioner.yaml  <-- DELETE THIS LINE
+  - ./nfs-provisioner.yaml

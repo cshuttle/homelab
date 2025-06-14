@@ -1,13 +1,12 @@
 # FILE: apps/base/linkding/storage.yaml
-# PURPOSE: To claim the statically defined NFS PersistentVolume.
+# PURPOSE: To request dynamically provisioned storage from the NFS provisioner.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: linkding-data-pvc
 spec:
-  # An empty storageClassName allows this PVC to bind to the PV
-  # we defined, which also has no storage class.
-  storageClassName: ""
+  # This now requests storage from our dynamic NFS provisioner.
+  storageClassName: nfs-client
   accessModes:
     - ReadWriteOnce
   resources:
