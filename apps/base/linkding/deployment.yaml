@@ -1,3 +1,5 @@
+# FILE: apps/base/linkding/deployment.yaml
+# PURPOSE: Mount the persistent volume into the container.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,15 +15,26 @@ spec:
         app: linkding
     spec:
       containers:
-        - name: linkding
-          image: sissbruecker/linkding:1.31.0
-          ports:
-            - containerPort: 9090
-
-          volumeMounts:
-            - name: linkding-data
-              mountPath: /etc/linkding/data
+      - name: linkding
+        image: sissbruecker/linkding:1.33.0-alpine
+        ports:
+        - containerPort: 9090
+        # Add the volume mount to persist data
+        volumeMounts:
+        - name: data
+          mountPath: /etc/linkding/data
+        # This section adds CPU and Memory requests, which is critical for scheduling.
+        # Your 'describe pod' output indicated this was missing from your active deployment.
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+      # Define the volume using the PersistentVolumeClaim
       volumes:
-        - name: linkding-data
-          persistentVolumeClaim:
-            claimName: linkding-data-pvc
+      - name: data
+        persistentVolumeClaim:
+          # This now correctly points to your PVC named 'linkding-data-pvc'
+          claimName: linkding-data-pvc
