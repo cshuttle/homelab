@@ -1,0 +1,17 @@
+# FILE: clusters/staging/storage-provisioner.yaml
+# PURPOSE: A new Flux Kustomization to deploy the storage provisioner.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: storage-provisioner
+  namespace: flux-system
+spec:
+  interval: 10m0s
+  # Point directly to the base manifests for the provisioner.
+  path: ./apps/base/storage-provisioner
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  # We do NOT specify a targetNamespace here,
+  # allowing the manifests to create their own 'local-path-storage' namespace.

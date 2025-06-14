@@ -1,0 +1,12 @@
+# FILE: clusters/staging/kustomization.yaml
+# PURPOSE: To orchestrate all components for the 'staging' cluster.
+# This file should now exist at this path.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  # Your existing Flux bootstrap components
+  - ./flux-system/
+  # The Kustomization for your applications
+  - ./apps.yaml
+  # The new Kustomization for your infrastructure
+  - ./storage-provisioner.yaml
