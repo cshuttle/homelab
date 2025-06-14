@@ -74,16 +74,23 @@ metadata:
 
 
 ```path=apps/base/linkding/storage.yaml
+# FILE: apps/base/linkding/storage.yaml
+# PURPOSE: To request persistent storage from the local-path provisioner.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
+  # This name MUST match the claimName in your deployment.yaml
   name: linkding-data-pvc
 spec:
+  # THIS IS THE FIX:
+  # Explicitly request the 'local-path' StorageClass.
+  storageClassName: local-path
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
       storage: 1Gi
+
 ```
 
 
@@ -102,8 +109,9 @@ resources:
 
 
 ```path=apps/base/storage-provisioner/local-path-provisioner.yaml
-# local-path-provisioner.yaml
-# Source: https://github.com/rancher/local-path-provisioner
+# FILE: apps/base/storage-provisioner/local-path-provisioner.yaml
+# PURPOSE: Aligned with official Talos documentation for compatibility.
+# Source: https://www.talos.dev/v1.10/kubernetes-guides/configuration/local-storage/
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -164,7 +172,7 @@ spec:
       serviceAccountName: local-path-provisioner-service-account
       containers:
         - name: local-path-provisioner
-          image: rancher/local-path-provisioner:v0.0.24
+          image: rancher/local-path-provisioner:v0.0.31
           imagePullPolicy: IfNotPresent
           command:
             - local-path-provisioner
@@ -175,6 +183,10 @@ spec:
           volumeMounts:
             - name: config-volume
               mountPath: /etc/config/
+            # THIS IS THE FIX FOR TALOS:
+            # Mount a writable path from the host into the container.
+            - name: path
+              mountPath: /var/local-path-provisioner
           env:
             - name: POD_NAMESPACE
               valueFrom:
@@ -184,6 +196,11 @@ spec:
         - name: config-volume
           configMap:
             name: local-path-config
+        # THIS IS THE FIX FOR TALOS:
+        # Define the hostPath volume that corresponds to the mount.
+        - name: path
+          hostPath:
+            path: /var/local-path-provisioner
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -196,7 +213,9 @@ data:
             "nodePathMap":[
             {
                     "node":"DEFAULT_PATH_FOR_NON_LISTED_NODES",
-                    "paths":["/opt/local-path-provisioner"]
+                    # THIS IS THE FIX FOR TALOS:
+                    # Point the provisioner to the writable host path.
+                    "paths":["/var/local-path-provisioner"]
             }
             ]
     }
@@ -215,6 +234,15 @@ metadata:
 provisioner: rancher.io/local-path
 volumeBindingMode: WaitForFirstConsumer
 reclaimPolicy: Delete
+```
+
+
+```path=apps/staging/kustomization.yaml
+# FILE: apps/staging/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ./linkding
 ```
 
 
