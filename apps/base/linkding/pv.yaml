@@ -15,7 +15,7 @@ spec:
     - hard
     - nfsvers=4.1
   nfs:
-    server: nas-srv.int.intergrem.com
+    server: nas-server.int.intergrem.com
     # Using a subdirectory for the application is recommended.
     # IMPORTANT: You must create this 'linkding' directory on your NFS share.
     path: "/volume1/K8S/linkding"
