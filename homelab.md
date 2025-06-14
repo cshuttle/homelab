@@ -97,167 +97,125 @@ metadata:
 
 ```path=apps/base/linkding/storage.yaml
 # FILE: apps/base/linkding/storage.yaml
-# PURPOSE: To request persistent storage from the local-path provisioner.
+# PURPOSE: To request dynamically provisioned storage from the NFS provisioner.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  # This name MUST match the claimName in your deployment.yaml
   name: linkding-data-pvc
 spec:
-  # THIS IS THE FIX:
-  # Explicitly request the 'local-path' StorageClass.
-  storageClassName: local-path
+  # This now requests storage from our dynamic NFS provisioner.
+  storageClassName: nfs-client
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
       storage: 1Gi
-
 ```
 
 
-```path=apps/base/storage-provisioner/kustomization.yaml
-# kustomization.yaml
-# Place this file in your `base/storage-provisioner` directory.
+```path=apps/base/nfs-provisioner/kustomization.yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
-# This list tells Kustomize which files to apply from this directory.
 resources:
-  - local-path-provisioner.yaml
-  - local-path-storageclass.yaml
-
+  - provisioner.yaml
+  - storageclass.yaml
 ```
 
 
-```path=apps/base/storage-provisioner/local-path-provisioner.yaml
-# FILE: apps/base/storage-provisioner/local-path-provisioner.yaml
-# PURPOSE: Aligned with official Talos documentation for compatibility.
-# Source: https://www.talos.dev/v1.10/kubernetes-guides/configuration/local-storage/
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: local-path-storage
----
+```path=apps/base/nfs-provisioner/nfs-provisioner.yaml
+# FILE: apps/base/nfs-provisioner/provisioner.yaml
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: local-path-provisioner-service-account
-  namespace: local-path-storage
-labels:
-  pod-security.kubernetes.io/enforce: privileged
-  pod-security.kubernetes.io/enforce-version: latest
+  name: nfs-client-provisioner
+  namespace: default # This can be deployed in any namespace, 'default' is fine.
 ---
-apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: local-path-provisioner-role
+  name: nfs-client-provisioner-runner
 rules:
-  - apiGroups: [""]
-    resources: ["nodes", "persistentvolumeclaims", "configmaps"]
-    verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["persistentvolumes"]
     verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "update"]
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses"]
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["events"]
-    verbs: ["create", "patch"]
+    verbs: ["create", "update", "patch"]
 ---
-apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: local-path-provisioner-bind
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: local-path-provisioner-role
+  name: run-nfs-client-provisioner
 subjects:
   - kind: ServiceAccount
-    name: local-path-provisioner-service-account
-    namespace: local-path-storage
+    name: nfs-client-provisioner
+    namespace: default
+roleRef:
+  kind: ClusterRole
+  name: nfs-client-provisioner-runner
+  apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: local-path-provisioner
-  namespace: local-path-storage
+  name: nfs-client-provisioner
+  labels:
+    app: nfs-client-provisioner
+  namespace: default
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
-      app: local-path-provisioner
+      app: nfs-client-provisioner
   template:
     metadata:
       labels:
-        app: local-path-provisioner
+        app: nfs-client-provisioner
     spec:
-      serviceAccountName: local-path-provisioner-service-account
+      serviceAccountName: nfs-client-provisioner
       containers:
-        - name: local-path-provisioner
-          image: rancher/local-path-provisioner:v0.0.31
-          imagePullPolicy: IfNotPresent
-          command:
-            - local-path-provisioner
-            - --debug
-            - start
-            - --config
-            - /etc/config/config.json
+        - name: nfs-client-provisioner
+          image: k8s.gcr.io/sig-storage/nfs-subdir-external-provisioner:v4.0.2
           volumeMounts:
-            - name: config-volume
-              mountPath: /etc/config/
-            # This is the fix for Talos:
-            # Mount a writable path from the host into the container.
-            - name: path
-              mountPath: /var/local-path-provisioner
+            - name: nfs-client-root
+              mountPath: /persistentvolumes
           env:
-            - name: POD_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
+            - name: PROVISIONER_NAME
+              value: k8s-sigs.io/nfs-subdir-external-provisioner
+            - name: NFS_SERVER
+              # Use the IP address to avoid DNS issues we saw earlier.
+              value: nas-server.int.intergrem.com #<-- REPLACE WITH YOUR NFS SERVER'S IP
+            - name: NFS_PATH
+              value: /volume1/K8S
       volumes:
-        - name: config-volume
-          configMap:
-            name: local-path-config
-        # This is the fix for Talos:
-        # Define the hostPath volume that corresponds to the mount.
-        - name: path
-          hostPath:
-            path: /var/local-path-provisioner
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: local-path-config
-  namespace: local-path-storage
-data:
-  # THIS IS THE FIX:
-  # The comments have been removed from the JSON content below.
-  config.json: |-
-    {
-            "nodePathMap":[
-            {
-                    "node":"DEFAULT_PATH_FOR_NON_LISTED_NODES",
-                    "paths":["/var/local-path-provisioner"]
-            }
-            ]
-    }
+        - name: nfs-client-root
+          nfs:
+            # Use the IP address to avoid DNS issues.
+            server: nas-server.int.intergrem.com #<-- REPLACE WITH YOUR NFS SERVER'S IP
+            path: /volume1/K8S
 ```
 
 
-```path=apps/base/storage-provisioner/local-path-storageclass.yaml
-# local-path-storageclass.yaml
+```path=apps/base/nfs-provisioner/storageclass.yaml
+# FILE: apps/base/nfs-provisioner/storageclass.yaml
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: local-path
+  name: nfs-client
   annotations:
     storageclass.kubernetes.io/is-default-class: "true"
-provisioner: rancher.io/local-path
-volumeBindingMode: WaitForFirstConsumer
-reclaimPolicy: Delete
+provisioner: k8s-sigs.io/nfs-subdir-external-provisioner
+parameters:
+  # When a PVC is deleted, the corresponding subdirectory will also be deleted.
+  archiveOnDelete: "false"
 ```
 
 
@@ -267,6 +225,23 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ./linkding
+```
+
+
+```path=apps/staging/nfs-provisioner.yaml
+# FILE: clusters/staging/nfs-provisioner.yaml
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: nfs-provisioner
+  namespace: flux-system
+spec:
+  interval: 10m0s
+  path: ./apps/base/nfs-provisioner
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
 ```
 
 
@@ -289,7 +264,7 @@ metadata:
   namespace: flux-system
 spec:
   dependsOn:
-    - name: storage-provisioner
+    - name: nfs-provisioner
   interval: 10m0s
   retryInterval: 1m
   timeout: 5m
@@ -303,40 +278,12 @@ spec:
 
 ```path=clusters/staging/kustomization.yaml
 # FILE: clusters/staging/kustomization.yaml
-# PURPOSE: To orchestrate all components for the 'staging' cluster.
-# This file should now exist at this path.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  # Your existing Flux bootstrap components
   - ./flux-system/
-  # The Kustomization for your applications
   - ./apps.yaml
-  # The new Kustomization for your infrastructure
-  - ./storage-provisioner.yaml
-
-```
-
-
-```path=clusters/staging/storage-provisioner.yaml
-# FILE: clusters/staging/storage-provisioner.yaml
-# PURPOSE: A new Flux Kustomization to deploy the storage provisioner.
-apiVersion: kustomize.toolkit.fluxcd.io/v1
-kind: Kustomization
-metadata:
-  name: storage-provisioner
-  namespace: flux-system
-spec:
-  interval: 10m0s
-  # Point directly to the base manifests for the provisioner.
-  path: ./apps/base/storage-provisioner
-  prune: true
-  sourceRef:
-    kind: GitRepository
-    name: flux-system
-  # We do NOT specify a targetNamespace here,
-  # allowing the manifests to create their own 'local-path-storage' namespace.
-
+  - ./nfs-provisioner.yaml
 ```
 
 
