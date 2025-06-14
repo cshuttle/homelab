@@ -12,6 +12,8 @@ clusters
 
 
 ```path=apps/base/linkding/deployment.yaml
+# FILE: apps/base/linkding/deployment.yaml
+# PURPOSE: Mount the persistent volume into the container.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -31,15 +33,25 @@ spec:
         image: sissbruecker/linkding:1.33.0-alpine
         ports:
         - containerPort: 9090
+        # Add the volume mount to persist data
+        volumeMounts:
+        - name: data
+          mountPath: /etc/linkding/data
+        # This section adds CPU and Memory requests, which is critical for scheduling.
+        # Your 'describe pod' output indicated this was missing from your active deployment.
         resources:
           requests:
-            # Guarantees the pod gets at least this much. Crucial for scheduling.
-            cpu: "100m"      # 100 millicores (0.1 of a CPU core)
-            memory: "128Mi"  # 128 Mebibytes
+            cpu: "100m"
+            memory: "128Mi"
           limits:
-            # The absolute maximum the pod is allowed to use.
-            cpu: "500m"      # 500 millicores (0.5 of a CPU core)
-            memory: "256Mi"  # 256 Mebibytes
+            cpu: "500m"
+            memory: "256Mi"
+      # Define the volume using the PersistentVolumeClaim
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          # This now correctly points to your PVC named 'linkding-data-pvc'
+          claimName: linkding-data-pvc
 ```
 
 
@@ -49,6 +61,7 @@ kind: Kustomization
 resources:
   - deployment.yaml
   - namespace.yaml
+  - storage.yaml
 ```
 
 
@@ -57,6 +70,20 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: linkding
+```
+
+
+```path=apps/base/linkding/storage.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: linkding-data-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
 ```
 
 
@@ -197,7 +224,7 @@ kind: Kustomization
 namespace: linkding
 resources:
   - ../../base/linkding/
-  - ../../base/storage-provisioner/
+
 ```
 
 
@@ -218,6 +245,45 @@ spec:
     name: flux-system
   path: ./apps/staging
   prune: true
+```
+
+
+```path=clusters/staging/kustomization.yaml
+# FILE: clusters/staging/kustomization.yaml
+# PURPOSE: To orchestrate all components for the 'staging' cluster.
+# This file should now exist at this path.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  # Your existing Flux bootstrap components
+  - ./flux-system/
+  # The Kustomization for your applications
+  - ./apps.yaml
+  # The new Kustomization for your infrastructure
+  - ./storage-provisioner.yaml
+
+```
+
+
+```path=clusters/staging/storage-provisioner.yaml
+# FILE: clusters/staging/storage-provisioner.yaml
+# PURPOSE: A new Flux Kustomization to deploy the storage provisioner.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: storage-provisioner
+  namespace: flux-system
+spec:
+  interval: 10m0s
+  # Point directly to the base manifests for the provisioner.
+  path: ./apps/base/storage-provisioner
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  # We do NOT specify a targetNamespace here,
+  # allowing the manifests to create their own 'local-path-storage' namespace.
+
 ```
 
 

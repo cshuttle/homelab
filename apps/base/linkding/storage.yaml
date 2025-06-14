@@ -1,8 +1,14 @@
+# FILE: apps/base/linkding/storage.yaml
+# PURPOSE: To request persistent storage from the local-path provisioner.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
+  # This name MUST match the claimName in your deployment.yaml
   name: linkding-data-pvc
 spec:
+  # THIS IS THE FIX:
+  # Explicitly request the 'local-path' StorageClass.
+  storageClassName: local-path
   accessModes:
     - ReadWriteOnce
   resources:
