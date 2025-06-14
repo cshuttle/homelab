@@ -1,3 +1,25 @@
+```path=debug-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: debug-hostpath
+  namespace: default
+spec:
+  containers:
+  - name: debug
+    image: busybox:1.36
+    command: ["sleep", "3600"]
+    volumeMounts:
+    - name: var-dir
+      mountPath: /host/var
+  volumes:
+  - name: var-dir
+    hostPath:
+      path: /var
+
+```
+
+
 ```path=readme.txt
 clusters
     staging
@@ -122,6 +144,9 @@ kind: ServiceAccount
 metadata:
   name: local-path-provisioner-service-account
   namespace: local-path-storage
+labels:
+  pod-security.kubernetes.io/enforce: privileged
+  pod-security.kubernetes.io/enforce-version: latest
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -183,7 +208,7 @@ spec:
           volumeMounts:
             - name: config-volume
               mountPath: /etc/config/
-            # THIS IS THE FIX FOR TALOS:
+            # This is the fix for Talos:
             # Mount a writable path from the host into the container.
             - name: path
               mountPath: /var/local-path-provisioner
@@ -196,7 +221,7 @@ spec:
         - name: config-volume
           configMap:
             name: local-path-config
-        # THIS IS THE FIX FOR TALOS:
+        # This is the fix for Talos:
         # Define the hostPath volume that corresponds to the mount.
         - name: path
           hostPath:
@@ -208,18 +233,17 @@ metadata:
   name: local-path-config
   namespace: local-path-storage
 data:
+  # THIS IS THE FIX:
+  # The comments have been removed from the JSON content below.
   config.json: |-
     {
             "nodePathMap":[
             {
                     "node":"DEFAULT_PATH_FOR_NON_LISTED_NODES",
-                    # THIS IS THE FIX FOR TALOS:
-                    # Point the provisioner to the writable host path.
                     "paths":["/var/local-path-provisioner"]
             }
             ]
     }
-
 ```
 
 
@@ -257,15 +281,16 @@ resources:
 
 
 ```path=clusters/staging/apps.yaml
+# FILE: clusters/staging/apps.yaml
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
   name: apps
   namespace: flux-system
 spec:
+  dependsOn:
+    - name: storage-provisioner
   interval: 10m0s
-  # dependsOn:
-  #   - name: infra-configs
   retryInterval: 1m
   timeout: 5m
   sourceRef:

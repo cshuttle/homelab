@@ -5,15 +5,17 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: local-path-storage
+  # THIS IS THE FIX:
+  # The PSS labels are correctly placed on the Namespace resource.
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/enforce-version: latest
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: local-path-provisioner-service-account
   namespace: local-path-storage
-labels:
-  pod-security.kubernetes.io/enforce: privileged
-  pod-security.kubernetes.io/enforce-version: latest
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -75,8 +77,6 @@ spec:
           volumeMounts:
             - name: config-volume
               mountPath: /etc/config/
-            # This is the fix for Talos:
-            # Mount a writable path from the host into the container.
             - name: path
               mountPath: /var/local-path-provisioner
           env:
@@ -88,8 +88,6 @@ spec:
         - name: config-volume
           configMap:
             name: local-path-config
-        # This is the fix for Talos:
-        # Define the hostPath volume that corresponds to the mount.
         - name: path
           hostPath:
             path: /var/local-path-provisioner
@@ -100,8 +98,6 @@ metadata:
   name: local-path-config
   namespace: local-path-storage
 data:
-  # THIS IS THE FIX:
-  # The comments have been removed from the JSON content below.
   config.json: |-
     {
             "nodePathMap":[
