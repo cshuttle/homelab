@@ -1,0 +1,22 @@
+# FILE: apps/base/linkding/pv.yaml
+# PURPOSE: To define a PersistentVolume backed by your NFS share.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: linkding-nfs-pv
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: "" # An empty storageClassName is used for static provisioning
+  mountOptions:
+    - hard
+    - nfsvers=4.1
+  nfs:
+    server: nas-srv.int.intergrem.com
+    # Using a subdirectory for the application is recommended.
+    # IMPORTANT: You must create this 'linkding' directory on your NFS share.
+    path: "/volume1/K8S/linkding"
+    readOnly: false

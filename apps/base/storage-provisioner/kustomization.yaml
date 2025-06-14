@@ -1,9 +1,0 @@
-# kustomization.yaml
-# Place this file in your `base/storage-provisioner` directory.
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-
-# This list tells Kustomize which files to apply from this directory.
-resources:
-  - local-path-provisioner.yaml
-  - local-path-storageclass.yaml
