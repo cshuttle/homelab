@@ -2,20 +2,13 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: debug-hostpath
-  namespace: default
+  name: debug-pod
+  namespace: linkding
 spec:
   containers:
   - name: debug
-    image: busybox:1.36
+    image: alpine/curl:latest
     command: ["sleep", "3600"]
-    volumeMounts:
-    - name: var-dir
-      mountPath: /host/var
-  volumes:
-  - name: var-dir
-    hostPath:
-      path: /var
 
 ```
 
@@ -50,6 +43,11 @@ spec:
       labels:
         app: linkding
     spec:
+      securityContext:
+        fsGroup: 82 # www-data group ID
+        runAsUser: 82 # www-data user ID
+        runAsGroup: 82 # www-data group ID
+
       containers:
       - name: linkding
         image: sissbruecker/linkding:1.33.0-alpine
@@ -84,6 +82,7 @@ resources:
   - deployment.yaml
   - namespace.yaml
   - storage.yaml
+  - service.yaml
 ```
 
 
@@ -92,6 +91,20 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: linkding
+```
+
+
+```path=apps/base/linkding/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: linkding
+spec:
+  ports:
+    - port: 9090
+  selector:
+    app: linkding
+  type: ClusterIP
 ```
 
 
@@ -122,13 +135,13 @@ resources:
 ```
 
 
-```path=apps/base/nfs-provisioner/nfs-provisioner.yaml
+```path=apps/base/nfs-provisioner/provisioner.yaml
 # FILE: apps/base/nfs-provisioner/provisioner.yaml
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: nfs-client-provisioner
-  namespace: default # This can be deployed in any namespace, 'default' is fine.
+  namespace: default
 ---
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
@@ -147,6 +160,11 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "update", "patch"]
+  # THIS IS THE FIX:
+  # Add permissions for the provisioner to manage leader election locks.
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
@@ -191,16 +209,16 @@ spec:
             - name: PROVISIONER_NAME
               value: k8s-sigs.io/nfs-subdir-external-provisioner
             - name: NFS_SERVER
-              # Use the IP address to avoid DNS issues we saw earlier.
-              value: nas-server.int.intergrem.com #<-- REPLACE WITH YOUR NFS SERVER'S IP
+              # Use the IP address to avoid DNS issues.
+              value: "nas-server.int.intergrem.com"
             - name: NFS_PATH
-              value: /volume1/K8S
+              value: "/volume1/K8S"
       volumes:
         - name: nfs-client-root
           nfs:
             # Use the IP address to avoid DNS issues.
-            server: nas-server.int.intergrem.com #<-- REPLACE WITH YOUR NFS SERVER'S IP
-            path: /volume1/K8S
+            server: "nas-server.int.intergrem.com"
+            path: "/volume1/K8S"
 ```
 
 
@@ -228,20 +246,96 @@ resources:
 ```
 
 
-```path=apps/staging/nfs-provisioner.yaml
-# FILE: clusters/staging/nfs-provisioner.yaml
-apiVersion: kustomize.toolkit.fluxcd.io/v1
-kind: Kustomization
+```path=apps/staging/linkding/cloudflare.yaml
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: nfs-provisioner
-  namespace: flux-system
+  name: cloudflared
 spec:
-  interval: 10m0s
-  path: ./apps/base/nfs-provisioner
-  prune: true
-  sourceRef:
-    kind: GitRepository
-    name: flux-system
+  selector:
+    matchLabels:
+      app: cloudflared
+  replicas: 2 # You could also consider elastic scaling for this deployment
+  template:
+    metadata:
+      labels:
+        app: cloudflared
+    spec:
+      containers:
+      - name: cloudflared
+        image: cloudflare/cloudflared:latest
+        args:
+        - tunnel
+
+        # Points cloudflared to the config file, which configures what
+        # cloudflared will actually do. This file is created by a ConfigMap
+        # below.
+        - --config
+        - /etc/cloudflared/config/config.yaml
+        - run
+        livenessProbe:
+          httpGet:
+            # Cloudflared has a /ready endpoint which returns 200 if and only if
+            # it has an active connection to the edge.
+            path: /ready
+            port: 2000
+          failureThreshold: 1
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        volumeMounts:
+        - name: config
+          mountPath: /etc/cloudflared/config
+          readOnly: true
+        # Each tunnel has an associated "credentials file" which authorizes machines
+        # to run the tunnel. cloudflared will read this file from its local filesystem,
+        # and it'll be stored in a k8s secret.
+        - name: creds
+          mountPath: /etc/cloudflared/creds
+          readOnly: true
+      volumes:
+      - name: creds
+        secret:
+          secretName: tunnel-credentials
+      # Create a config.yaml file from the ConfigMap below.
+      - name: config
+        configMap:
+          name: cloudflared
+          items:
+          - key: config.yaml
+            path: config.yaml
+---
+# This ConfigMap is just a way to define the cloudflared config.yaml file in k8s.
+# It's useful to define it in k8s, rather than as a stand-alone .yaml file, because
+# this lets you use various k8s templating solutions (e.g. Helm charts) to
+# parameterize your config, instead of just using string literals.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflared
+data:
+  config.yaml: |
+    # Name of the tunnel you want to run
+    
+    tunnel: linkding-staging
+
+    credentials-file: /etc/cloudflared/creds/credentials.json
+
+    # Serves the metrics server under /metrics and the readiness server under /ready
+    metrics: 0.0.0.0:2000
+    no-autoupdate: true
+
+    ingress:
+    - hostname: linkding-staging.intergrem.com
+      service: http://linkding:9090
+
+    # This rule sends traffic to the built-in hello-world HTTP server. This can help debug connectivity
+    # issues. If hello.example.com resolves and tunnel.example.com does not, then the problem is
+    # in the connection from cloudflared to your local service, not from the internet to cloudflared.
+    - hostname: hello.example.com
+      service: hello_world
+    # This rule matches any traffic which didn't match a previous rule, and responds with HTTP 404.
+    - service: http_status:404
+
 ```
 
 
@@ -251,6 +345,36 @@ kind: Kustomization
 namespace: linkding
 resources:
   - ../../base/linkding/
+  #- cloudflare.yaml
+  - test-secret.yaml
+```
+
+
+```path=apps/staging/linkding/test-secret.yaml
+apiVersion: v1
+data:
+    password: ENC[AES256_GCM,data:CpFaDBWUraQ=,iv:iqq7eKO2K+++v4kN2i1qG9bbscQ6W6sJElfPNIke3XE=,tag:fJlo5J7xcbFmII6mO4yo2g==,type:str]
+    user: ENC[AES256_GCM,data:he2yFGA2Fvc=,iv:LM8awvmrFsDZim5i6lp3GAyCj9hmUhZPt4s98BI4YWI=,tag:gf+gPCQ+fER5qpRp0OKmBg==,type:str]
+kind: Secret
+metadata:
+    name: test-secret
+    namespace: linkding
+type: Opaque
+sops:
+    age:
+        - recipient: age15wqm7z3mc9xaz56yt6ymeplwtvfcga9ncy7eqd0vfpt7yts24yuqt72v6v
+          enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBqeE1LRzZFbmd1cWkvMnRE
+            U1hVQ29pck1MSjd1OFV6VTcwTWFMcUxqL0ZvCmtkUEl0bDl2UWZ1eUJJcHlIR3g0
+            a0V5Qnc1VFJzT1lyV09RTE1FS3NoRXMKLS0tIHU3MEhDaDVXekpZaTZGWnVoUGJJ
+            N252cnhTRWpzME10SFZPTEJkYi9Da1EKeFqv8AE4tKsF0MUTddUaykKxcnhEUIiy
+            IWaq0Ry10lWW7FVx0nEwgYjX2HE3BnAhWneLzNQrsVhpgKjum85tNg==
+            -----END AGE ENCRYPTED FILE-----
+    lastmodified: "2025-06-15T00:37:57Z"
+    mac: ENC[AES256_GCM,data:dBTchdw4Au9p+ECwOEW2a/8NKe5xxlgwo4t0hPrTgdx9lgvc9TYyKvVbPCVKuceBBvUTc4CWbBSbytrRhFkgyw39KgabiEkdH+tPs2xEqgi2CUoUEhp4yh8FlUET4FgIIbI3oNfygJm+/vd53fWVcN7VBoR6ZCvgC2OM+kVXH0s=,iv:YWczIrjdc8TMvDb5+ajjf46zGaKTGy1xxYGnOsbXEFA=,tag:5S7yqdq0RO3WQKjt4yNIrw==,type:str]
+    encrypted_regex: ^(data|stringData)$
+    version: 3.10.2
 
 ```
 
@@ -273,6 +397,10 @@ spec:
     name: flux-system
   path: ./apps/staging
   prune: true
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
 ```
 
 
@@ -284,6 +412,23 @@ resources:
   - ./flux-system/
   - ./apps.yaml
   - ./nfs-provisioner.yaml
+```
+
+
+```path=clusters/staging/nfs-provisioner.yaml
+# FILE: clusters/staging/nfs-provisioner.yaml
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: nfs-provisioner
+  namespace: flux-system
+spec:
+  interval: 10m0s
+  path: ./apps/base/nfs-provisioner
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
 ```
 
 
