@@ -5,3 +5,4 @@ resources:
   - ./flux-system/
   - ./apps.yaml
   - ./nfs-provisioner.yaml
+  - ./monitoring.yaml
