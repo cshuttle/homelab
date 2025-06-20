@@ -21,7 +21,7 @@ spec:
 
       containers:
       - name: linkding
-        image: sissbruecker/linkding:1.33.0-alpine
+        image: sissbruecker/linkding:1.41.0-alpine
         ports:
         - containerPort: 9090
         # Add the volume mount to persist data
