@@ -1,18 +1,3 @@
-```path=debug-pod.yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: debug-pod
-  namespace: linkding
-spec:
-  containers:
-  - name: debug
-    image: alpine/curl:latest
-    command: ["sleep", "3600"]
-
-```
-
-
 ```path=readme.txt
 clusters
     staging
@@ -346,7 +331,7 @@ namespace: linkding
 resources:
   - ../../base/linkding/
   #- cloudflare.yaml
-  - test-secret.yaml
+  #- test-secret.yaml
 ```
 
 
@@ -412,6 +397,52 @@ resources:
   - ./flux-system/
   - ./apps.yaml
   - ./nfs-provisioner.yaml
+  - ./monitoring.yaml
+
+```
+
+
+```path=clusters/staging/monitoring.yaml
+# FILE: clusters/staging/apps.yaml
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: monitoring-controllers
+  namespace: flux-system
+spec:
+  interval: 10m0s
+  retryInterval: 1m
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./monitoring/controllers/staging
+  prune: true
+  #decryption:
+  #  provider: sops
+  #  secretRef:
+  #    name: sops-age
+
+#---
+## FILE: clusters/staging/apps.yaml
+#apiVersion: kustomize.toolkit.fluxcd.io/v1
+#kind: Kustomization
+#metadata:
+#  name: monitoring-configs
+#  namespace: flux-system
+#spec:
+#  interval: 10m0s
+#  retryInterval: 1m
+#  timeout: 5m
+#  sourceRef:
+#    kind: GitRepository
+#    name: flux-system
+#  path: ./monitoring/configs/staging
+#  prune: true
+#  #decryption:
+#  #  provider: sops
+#  #  secretRef:
+#  #    name: sops-age
 ```
 
 
@@ -13507,5 +13538,99 @@ kind: Kustomization
 resources:
 - gotk-components.yaml
 - gotk-sync.yaml
+
+```
+
+
+```path=monitoring/controllers/base/kube-prometheus-stack/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - repository.yaml
+  - release.yaml
+
+```
+
+
+```path=monitoring/controllers/base/kube-prometheus-stack/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+
+```
+
+
+```path=monitoring/controllers/base/kube-prometheus-stack/release.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kube-prometheus-stack
+  namespace: monitoring
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: kube-prometheus-stack
+      version: "66.2.2"
+
+      # version: "58.x"
+
+      sourceRef:
+        kind: HelmRepository
+        name: kube-prometheus-stack
+        namespace: monitoring
+      interval: 12h
+  install:
+    crds: Create
+    timeout: 15m
+  upgrade:
+    crds: CreateReplace
+    timeout: 15m
+  driftDetection:
+    mode: enabled
+    ignore:
+      # Ignore "validated" annotation which is not inserted during install
+      - paths: ["/metadata/annotations/prometheus-operator-validated"]
+        target:
+          kind: PrometheusRule
+  values:
+    grafana:
+      adminPassword: mischa
+
+```
+
+
+```path=monitoring/controllers/base/kube-prometheus-stack/repository.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: kube-prometheus-stack
+  namespace: monitoring
+spec:
+  interval: 24h
+  url: https://prometheus-community.github.io/helm-charts
+```
+
+
+```path=monitoring/controllers/staging/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: monitoring
+resources:
+  - kube-prometheus-stack
+
+```
+
+
+```path=monitoring/controllers/staging/kube-prometheus-stack/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: monitoring
+resources:
+  - ../../base/kube-prometheus-stack/
 
 ```
